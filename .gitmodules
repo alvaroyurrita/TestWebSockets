@@ -1,0 +1,6 @@
+[submodule "TestWebSocketServer"]
+	path = TestWebSocketServer
+	url = https://github.com/alvaroyurrita/TestWebSocketServer
+[submodule "TestWebSocketClient"]
+	path = TestWebSocketClient
+	url = https://github.com/alvaroyurrita/TestWebSocketClient
