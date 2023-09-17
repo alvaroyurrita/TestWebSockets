@@ -1,17 +1,22 @@
-# TestWebSocekts
+# TestWebSockets
 
 This projects uses RxJs WebSocket Client and C# WebSocketSharp to test different client responses to network and server events like network down, server down, etc.
 
-The main intent is to provide a Client side websocket capable of statying open permanently by retrying the connection when there are errors in the server, errors in the client, etc.
+The main intent is to provide a Client side websocket capable of staying open permanently by retrying the connection when there are errors in the server, errors in the client, etc.
 
 ## Server
 
-The server side is consists of a simple WebSocketSharp server with 4 differnt paths.  This was used to test how different paths can deliver messages to different clients that subscribe to them
+The server side is consists of a simple WebSocketSharp server with 4 different paths.  This was used to test how different paths can deliver messages to different clients that subscribe to them
+
+The server can run on Windows, Linux, and Mac as a console program.
+
 * Home
 * Office
 * Kitchen
 * Heartbeat
+
 From the server there are options to:
+
 * Start the Server
 * Stop the server
 * Broadcast a message to all clients in home
@@ -27,9 +32,11 @@ There are two branches on the client project:
     * Server Disconnects
     * Server network drops.
 
+The client can be run locally using Angular's ng serve command, or it can be run on a server using the ng build command to create a dist folder that can be served by a web server.
+
 ## Observations.
 Recovering a connection after a network drop is handled differently in different operating systems, and device types.  The RxJs Pipe.Retry observer is not sufficient to maintain a client connected permanently.  A heartbeat mechanism is needed in the client to check and recover from network error. RxJs provides several other functions to implement timeouts for lack of responses.  These are still too slow in certain circumstances, so a JavaScript network connect EventListener is used to detect local drops.
 
 ## UML
-The follwing UML diagram symbolizes the different tests made using the ButtonDriven Code.
+The following UML diagram symbolizes the different tests made using the ButtonDriven Code.
 ![Sequence Diagram](out/UML/Sequence/websocket-subscription.svg)
