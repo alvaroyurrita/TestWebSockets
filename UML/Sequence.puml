@@ -1,0 +1,368 @@
+@startuml websocket-subscription
+actor Actor
+participant "Websocket Subject" as ws
+participant "Websocket Subscription" as wss
+participant "Websocket Server" as wssv
+
+Actor -> ws++: Create Websocket Subject (ws$)
+== subscribing ==
+ws -> wss **: ws$.subscribe()
+ws -> wssv--++: Connect ws://address:port/path
+deactivate ws
+alt Server Listening
+    wssv -> wssv : opens connection
+    wssv --> ws--++: upgrade
+    ws -> Actor--: openObserver.Next (with message)
+    note over Actor, ws
+    message:
+    isTrusted: true
+    type: 'open'
+end note
+else Server Not Listening
+note over wss
+    Subscribe times out.
+end note
+wss -> Actor: subscription.error (with error)
+note over Actor, wss
+Error:
+isTrusted: true
+type: 'error'
+end note
+ws -> Actor: closeObserver.next (with message)
+note over Actor, ws
+Message:
+type: 'close'
+reason: ""
+code: 1006
+wasClean: false
+end note
+else Server Not Listening with ws$.Pipe(retry(time)).subscribe() on Desktop
+loop until connection opens
+note over wss
+Subscribe times out.  Retry kicks in.
+end note
+ws -> Actor: closeObserver.next (with message)
+note over Actor, ws
+Message:
+type: 'close'
+reason: ""
+code: 1006
+wasClean: false
+end note
+ws -> wss : Connect ws://address:port/path
+end
+else Server Not Listening with ws$.Pipe(retry(time)).subscribe() on Android or iOS
+note over wss
+Note that in closeObserver never triggers.
+Retry never kicks in. It will wait forever until it stablishes connection
+end note
+end
+
+== Sending a Message on Open Websocket ==
+note over Actor, wssv
+If subcription has not started, all messages are buffered and sent at once when the subcription starts
+end note
+Actor -> ws ++ : Send Message ("Full")
+ws -> wssv --++: "message" Opcode: Text
+wssv -> wss --++: "Server sent Full State"
+wss -> Actor -- : subscription.next ("Server sent Full State")
+note over Actor, wss
+message
+next: "reply if any"
+end note
+
+== Unsubscribing Websocket from subscription  ==
+note over Actor, wssv
+After unsubscribe it is possible to subscribe again to the same websocket subject
+If retry is piped, when the last subscription is closed, the retry will not retry the connection.
+end note
+Actor -> wss ++: this.subscription.unsubscribe();
+alt if no subscriptions
+wss -> wssv --++: opcode: Connection Close
+wssv -> ws --++: opcode: Connection Close
+ws -> Actor -- : closeObserver.Next (with message)
+note over Actor, wss
+isTrusted: true,
+wasClean: true,
+reason: ""
+code: 1005,
+type: 'close'
+On iOS an error is thrown to console:
+Websocket connection to {address} failed:
+The operation couldn't be completed.
+Socket is not connected
+end note
+end
+
+== Unsubscribing Websocket from subject  ==
+note over Actor, wssv
+After unsubscribe it is NOT possible to subscribe again to the same websocket subject
+If retry is piped, when the last subscription is closed, the retry will not retry the connection.
+end note
+Actor -> ws ++: this.subject.unsubscribe();
+ws -> wssv --++: opcode: Connection Close
+wssv -> ws --++: opcode: Connection Close
+ws -> Actor -- : closeObserver.Next (with message)
+alt windows, android
+loop all subscriptions
+wss -> Actor -- : subscription.Complete
+end
+else ios
+loop all subscriptions
+note over ws
+iOS throws a console error:
+Websocket connection to {address} failed:
+The operation couldn't be completed.
+Socket is not connected
+end note
+wss -> Actor -- : subscription.Error (Event: Type: "error", isTrusted: true)
+end
+end
+note over Actor, wss
+CloseEvent:
+isTrusted: true,
+wasClean: true, (iOS: false)
+reason: ""
+code: 1005, (iOS: 1006)
+type: 'close'
+end note
+
+== Completing Websocket from subject  ==
+note over Actor, wssv
+After unsubscribe it is possible to subscribe again to the same websocket subject
+If retry is piped, when the last subscription is closed, the retry will not retry the connection.
+end note
+Actor -> ws ++: this.subject.complete();
+ws -> wssv --++: opcode: Connection Close
+wssv -> ws --++: opcode: Connection Close
+ws -> Actor  : closingObserver.Next (with empty message)
+ws -> Actor -- : closeObserver.Next (with message)
+alt windows, android
+loop all subscriptions
+wss -> Actor -- : subscription.Complete
+end
+else ios
+loop all subscriptions
+note over ws
+iOS throws a console error:
+Websocket connection to {address} failed:
+The operation couldn't be completed.
+Socket is not connected
+end note
+wss -> Actor -- : subscription.Error (Event: Type: "error", isTrusted: true)
+end
+end
+note over Actor, wss
+CloseEvent:
+isTrusted: true,
+wasClean: true, (iOS: false)
+reason: ""
+code: 1005, (iOS: 1006)
+type: 'close'
+end note
+
+== Completing Websocket from subject with error ==
+note over Actor, wssv
+After unsubscribe it is possible to subscribe again to the same websocket subject
+If retry is piped, when the last subscription is closed, the retry will not retry the connection.
+end note
+Actor -> ws ++: this.subject.error(errorObject);
+ws -> wssv --++: opcode: Connection Close with payload
+note over ws, wssv
+Connection Close payload contains both Error Code and error message. It is repeated by server
+end note
+wssv -> ws --++: opcode: Connection Close with payload
+ws -> Actor  : closingObserver.Next (with empty message)
+ws -> Actor -- : closeObserver.Next (with message)
+alt windows, android
+loop all subscriptions
+wss -> Actor -- : subscription.Complete
+end
+else ios
+loop all subscriptions
+note over ws
+iOS throws a console error:
+Websocket connection to {address} failed:
+The operation couldn't be completed.
+Socket is not connected
+end note
+wss -> Actor -- : subscription.Error (Event: Type: "error", isTrusted: true)
+end
+end
+note over Actor, wss
+CloseEvent:
+isTrusted: true,
+wasClean: true, (iOS: false)
+code: 4005, (iOS: 1006)
+type: 'close'
+reason: 'Client Completing with Error!' (iOS: "")
+end note
+
+== Closing Websocket because of server initiated shutdown  ==
+note over Actor, wssv
+If retry is piped. Retry will not start when server closes connection.
+end note
+wssv -> ws --++: opcode: Connection Close
+note over ws, wssv
+Connection Close payload from server contains both Status Code and Reason.
+end note
+ws -> Actor --: closeObserver.Next (with message)
+wss -> Actor -- : subscription.Complete
+note over ws
+iOS throws a console error:
+Websocket connection to {address} failed:
+The operation couldn't be completed.
+Protocol error
+end note
+note over Actor, ws
+isTrusted: true,
+wasClean: true,
+code: 1001 (Going Away),
+type: 'close'
+reason: 'Closing Server Automatically after 10 seconds'
+end note
+
+== Server unexpected shutdown  ==
+note over Actor, wssv
+Retry kick differenty and at different rates.
+Seems to be governed by the timout on the subscribe message
+When the server comes back online, all client reconnect immediatly.
+end note
+ws -> Actor : closeObserver.Next (with message)
+note over Actor, ws
+server closes with:
+code: 1006
+Reason: ""
+wasClean: False
+type: "close"
+end note
+note over ws
+iOS throws a console error:
+Websocket connection to {address} failed:
+The operation couldn't be completed.
+Connection reset by peer
+end note
+alt on desktop
+loop until connection opens
+note over ws
+retry times out
+end note
+ws -> Actor: closeObserver.next (with message)
+note over Actor, ws
+Message:
+type: 'close'
+reason: ""
+code: 1006
+wasClean: false
+console logs error: WebSocket connection to {address} failed.
+end note
+
+ws -> wssv : connect
+end
+note over ws
+Server Back online
+end note
+wssv -> ws --++: connected
+ws -> Actor --: openObserver.Next (with message)
+else android 
+note over ws
+retry kicks once but the interval around 2m10s.
+console logs error: WebSocket connection to {address} failed. Error in connection establishment: net::ERR_CONNECTION_TIMED_OUT
+end note
+else iOS 
+note over ws
+retry kicks in but the interval aroun 30s.
+console logs error: WebSocket connection to {address} failed. The request timed out
+end note
+end
+
+
+== Mobile out of foucs or standby while Connected  ==
+note over ws, wssv
+iOS closes the socket immediatly internally, but doesnt update the app
+Android keeps the socket open for about 1m10s but eventually it shuts it off
+end note
+ws -> wssv ++: socket is closed
+wssv -> wssv --: Session Closed
+deactivate wssv
+note over wssv
+server closes with:
+code: 1006
+Reason: An Exception has occured while receiving
+end note
+note over ws, wssv
+device wakes up or app comes to foreground
+end note
+ws -> Actor : closeObserver.Next (with message)
+wss -> Actor : subscription.error (type: close, wasClean: false)
+alt Pipe.Retry()
+ws -> wssv ++: reconnect
+wssv -> ws --++: connected
+ws -> Actor --: openObserver.Next (with message)
+end
+
+
+
+== Network Disconnect Server Side  ==
+note over ws, wssv
+Clients are never aware that the server has gone down.
+Server closes all websocket connections after a about 50s seconds.
+end note
+wssv -> wssv : Network Drop
+... 50 seconds ...
+wssv -> wssv --: Websocket Closed
+note over Actor, ws
+.. Server Comes online again ..
+No client tryies to reconnect. They are still unaware that the server has gone down.
+If client sends a message to server there are several behaviors.
+Notice how the message is never retried.
+end note
+... server comes back ...
+Actor -> wss : Sends Message
+alt no retry
+    note over Actor, ws
+    Nothing happens.  No closeObserver is triggered.
+    Connection is never re-established
+    end note
+else pipe.retry() 
+    ... Windows: ~20 Seconds ...
+    ... iOS and Mac: ~55 Seconds ...
+    ... Android: 16m15s Seconds ...
+    ws -> Actor : closeObserver.Next (with message)
+    note over Actor, ws
+    server closes with:
+    code: 1006
+    Reason: ""
+    wasClean: False
+    end note
+    ws -> wssv ++: reconnect
+    wssv -> ws --++: connected
+    ws -> Actor --: openObserver.Next (with message)
+end
+
+
+== Network Disconnect Client Side  ==
+ws -> ws: Network Drop
+alt iOS, Mac and Windows
+...  50 seconds ...
+wssv -> wssv --: Websocket Closed
+ws -> ws: Network back up
+note over Actor, wssv
+ No further communications from client even after sending a message.
+end note
+else Android
+ws -> Actor : closeObserver.Next (with message)
+note over Actor, ws
+server closes with:
+code: 1006
+Reason: ""
+wasClean: False
+end note
+...  50 seconds ...
+wssv -> wssv --: Websocket Closed
+ws -> ws: Network back up
+ws -> wssv ++: reconnect
+wssv -> ws --++: connected
+ws -> Actor --: openObserver.Next (with message)
+end
+@enduml
